@@ -116,7 +116,7 @@ export default function App() {
     if (!t) return;
 
     if (!isAudioUnlocked()) {
-      await unlockAudioOnce(audioRef.current);
+      void unlockAudioOnce();
     }
 
     // ✅ 去重：同一句不要重复读
@@ -279,19 +279,25 @@ export default function App() {
   };
 
   const triggerAudioUnlock = () => {
-    void unlockAudioOnce(audioRef.current);
+    void unlockAudioOnce();
   };
 
   const enableSoundAndReplay = async () => {
     const audio = audioRef.current;
     if (!audio) return;
     try {
-      await unlockAudioOnce(audio);
       await audio.play();
       setNeedsSoundGesture(false);
     } catch (e) {
-      console.error("[tts] manual enable sound failed", e);
-      setNeedsSoundGesture(true);
+      console.error("[tts] manual play failed", e);
+      try {
+        await unlockAudioOnce();
+        await audio.play();
+        setNeedsSoundGesture(false);
+      } catch (err) {
+        console.error("[tts] manual enable sound failed", err);
+        setNeedsSoundGesture(true);
+      }
     }
   };
 
