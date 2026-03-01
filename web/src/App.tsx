@@ -268,6 +268,10 @@ export default function App() {
     await sendMessage(text);
   };
 
+  const triggerAudioUnlock = () => {
+    void unlockAudioOnce();
+  };
+
   return (
     <div className="app chatShell">
       <header className="header">
@@ -294,14 +298,14 @@ export default function App() {
           className="composerInput"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onFocus={unlockAudioOnce}
+          onFocus={triggerAudioUnlock}
           placeholder="Type a message"
           disabled={status === "connecting" || status === "streaming"}
         />
         <button
           className="sendBtn"
           type="submit"
-          onPointerDown={unlockAudioOnce}
+          onPointerDown={triggerAudioUnlock}
           disabled={status === "connecting" || status === "streaming"}
         >
           Send
@@ -312,8 +316,8 @@ export default function App() {
           isRecording={voice.isRecording}
           isTranscribing={voice.isTranscribing}
           onStart={async () => {
-            await unlockAudioOnce();
             await voice.start();
+            triggerAudioUnlock();
           }}
           onStop={voice.stop}
           right={0}
