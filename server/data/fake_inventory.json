@@ -1,0 +1,180 @@
+{
+  "version": "fake-inv-2",
+  "store_id": "store_madison_001",
+  "rows": [
+    {
+      "sku": "NUT-M6-A",
+      "item_name": "六角螺母",
+      "brand": "A品牌",
+      "category": "紧固件",
+      "model": "M6",
+      "aisle": "aisle1",
+      "bay": "bay001",
+      "on_hand": 2,
+      "price": 1.99,
+      "promotion": "买二送一"
+    },
+    {
+      "sku": "NUT-M6-B",
+      "item_name": "六角螺母",
+      "brand": "B品牌",
+      "category": "紧固件",
+      "model": "M6",
+      "aisle": "aisle1",
+      "bay": "bay002",
+      "on_hand": 12,
+      "price": 2.49,
+      "promotion": ""
+    },
+    {
+      "sku": "BOLT-M6-20-A",
+      "item_name": "六角螺栓",
+      "brand": "A品牌",
+      "category": "紧固件",
+      "model": "M6x20",
+      "aisle": "aisle1",
+      "bay": "bay010",
+      "on_hand": 1,
+      "price": 0.69,
+      "promotion": "清仓7折"
+    },
+
+    {
+      "sku": "PLY-18-4x8-TC",
+      "item_name": "胶合板",
+      "brand": "TimberCo",
+      "category": "木材",
+      "model": "18mm 4x8",
+      "aisle": "aisle3",
+      "bay": "bay120",
+      "on_hand": 55,
+      "price": 24.99,
+      "promotion": "本周9折"
+    },
+    {
+      "sku": "LUM-2x4-8-BC",
+      "item_name": "木方",
+      "brand": "BuildCraft",
+      "category": "木材",
+      "model": "2x4x8ft",
+      "aisle": "aisle3",
+      "bay": "bay110",
+      "on_hand": 3,
+      "price": 3.79,
+      "promotion": ""
+    },
+
+    {
+      "sku": "DRILL-18V-X1",
+      "item_name": "无绳电钻",
+      "brand": "BoltPro",
+      "category": "电动工具",
+      "model": "18V",
+      "aisle": "aisle8",
+      "bay": "bay210",
+      "on_hand": 8,
+      "price": 69.0,
+      "promotion": "赠送1个电池"
+    },
+    {
+      "sku": "DRILL-20V-Z9",
+      "item_name": "无绳电钻",
+      "brand": "MaxTorque",
+      "category": "电动工具",
+      "model": "20V",
+      "aisle": "aisle8",
+      "bay": "bay211",
+      "on_hand": 2,
+      "price": 89.0,
+      "promotion": ""
+    },
+    {
+      "sku": "BIT-SET-45",
+      "item_name": "钻头套装",
+      "brand": "BoltPro",
+      "category": "电动工具配件",
+      "model": "45件",
+      "aisle": "aisle8",
+      "bay": "bay230",
+      "on_hand": 20,
+      "price": 14.99,
+      "promotion": "第二件半价"
+    },
+
+    {
+      "sku": "PAINT-W-1G-EG",
+      "item_name": "内墙乳胶漆",
+      "brand": "EverGreen",
+      "category": "油漆",
+      "model": "白色 1加仑",
+      "aisle": "aisle5",
+      "bay": "bay080",
+      "on_hand": 0,
+      "price": 29.99,
+      "promotion": "满2加仑减5美元"
+    },
+    {
+      "sku": "PAINT-P-1G-EG",
+      "item_name": "内墙乳胶漆",
+      "brand": "EverGreen",
+      "category": "油漆",
+      "model": "浅灰 1加仑",
+      "aisle": "aisle5",
+      "bay": "bay081",
+      "on_hand": 6,
+      "price": 29.99,
+      "promotion": ""
+    },
+
+    {
+      "sku": "TOILET-SEAT-A1",
+      "item_name": "马桶盖",
+      "brand": "AquaHome",
+      "category": "卫浴",
+      "model": "通用缓降",
+      "aisle": "aisle10",
+      "bay": "bay300",
+      "on_hand": 2,
+      "price": 19.99,
+      "promotion": ""
+    },
+    {
+      "sku": "FAUCET-KITCHEN-K2",
+      "item_name": "厨房水龙头",
+      "brand": "FlowMaster",
+      "category": "卫浴",
+      "model": "单把手",
+      "aisle": "aisle10",
+      "bay": "bay320",
+      "on_hand": 4,
+      "price": 79.99,
+      "promotion": "赠送软管"
+    },
+
+    {
+      "sku": "GLOVES-NITRILE-M",
+      "item_name": "丁腈手套",
+      "brand": "SafeGrip",
+      "category": "劳保",
+      "model": "M码 100只",
+      "aisle": "aisle2",
+      "bay": "bay045",
+      "on_hand": 25,
+      "price": 9.99,
+      "promotion": ""
+    },
+
+    {
+      "sku": "LADDER-6FT",
+      "item_name": "铝合金梯子",
+      "brand": "StepUp",
+      "category": "五金工具",
+      "model": "6英尺",
+      "aisle": "aisle7",
+      "bay": "bay160",
+      "on_hand": 1,
+      "price": 59.99,
+      "promotion": "会员立减10%"
+    }
+  ]
+}

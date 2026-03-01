@@ -1,0 +1,8 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+httpx==0.28.1
+python-dotenv==1.1.1
+openai>=1.51.0
+openai-agents
+pydantic
+python-multipart

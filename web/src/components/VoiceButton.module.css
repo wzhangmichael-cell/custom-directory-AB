@@ -1,0 +1,135 @@
+.btn {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+
+  border: none;
+  background: #000000;
+  color: white;
+
+  cursor: pointer;
+  z-index: 50;
+
+  display: grid;
+  place-items: center;
+
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+
+  transition: transform 120ms ease, opacity 120ms ease, background 120ms ease;
+  user-select: none;
+  flex-shrink: 0;
+
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+
+  /* ✅ 放大 20% */
+  transform: scale(1.2);
+}
+
+.btn:hover {
+  background: rgba(0, 0, 0, 0.92);
+}
+
+.btn:focus,
+.btn:focus-visible,
+.btn:active {
+  outline: none;
+}
+
+.disabled {
+  opacity: 0.75;
+  cursor: not-allowed;
+}
+
+.recording {
+  transform: scale(1.2);
+}
+
+/* ===== icon positioning ===== */
+.iconWrap {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  transform: none;
+}
+.recording .iconWrap {
+  transform: scale(1);
+}
+
+/* ===== audio lines ===== */
+.audioIcon {
+  display: block;
+  stroke: #fff;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.bar {
+  transform-box: fill-box;
+  transform-origin: center;
+  --m: 1;
+  --min: 0.10; /* 默认静音最小高度（中间几条保持原样） */
+}
+
+.recording .bar {
+  animation: voiceBounce 0.9s ease-in-out infinite;
+}
+
+.recording .bar  { --m: 0.9; }
+.recording .bar2 { --m: 1.15; }
+.recording .bar3 { --m: 1.35; }
+.recording .bar4 { --m: 1.05; }
+.recording .bar5 { --m: 1.25; }
+.recording .bar6 { --m: 0.95; }
+
+/* ✅ 仅最左 / 最右：静音时更小，收成“点” */
+.recording .bar  { --min: 0.7; }
+.recording .bar6 { --min: 0.8; }
+
+.recording .bar2 { animation-delay: 0.10s; }
+.recording .bar3 { animation-delay: 0.20s; }
+.recording .bar4 { animation-delay: 0.15s; }
+.recording .bar5 { animation-delay: 0.25s; }
+.recording .bar6 { animation-delay: 0.05s; }
+
+@keyframes voiceBounce {
+  0% {
+    transform: scaleY(
+      calc(var(--min) + var(--voice-level, 0) * var(--m) * 1.60)
+    );
+  }
+  50% {
+    transform: scaleY(
+      calc(var(--min) + var(--voice-level, 0) * var(--m) * 2.20)
+    );
+  }
+  100% {
+    transform: scaleY(
+      calc(var(--min) + var(--voice-level, 0) * var(--m) * 1.60)
+    );
+  }
+}
+
+/* ===== spinner ===== */
+.spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: rgba(255, 255, 255, 0.9);
+  animation: gptSpin 0.8s linear infinite;
+}
+
+@keyframes gptSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.bar2 {}
+.bar3 {}
+.bar4 {}
+.bar5 {}
+.bar6 {}
