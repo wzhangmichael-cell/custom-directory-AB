@@ -32,6 +32,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string>("");
+  const [needsSoundGesture, setNeedsSoundGesture] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(() => {
     try {
       return localStorage.getItem(THREAD_KEY);
@@ -168,13 +169,11 @@ export default function App() {
 
     try {
       await audio.play();
+      setNeedsSoundGesture(false);
     } catch (e) {
       console.error("[tts] play blocked (Safari?)", e);
-      // 浏览器可能要求用户交互后才能播放
-      if (audioUrlRef.current === url) {
-        URL.revokeObjectURL(url);
-        audioUrlRef.current = null;
-      }
+      // Safari/WebKit may require explicit user gesture for audible playback.
+      setNeedsSoundGesture(true);
     }
   }
 
@@ -283,8 +282,21 @@ export default function App() {
     void unlockAudioOnce(audioRef.current);
   };
 
+  const enableSoundAndReplay = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    try {
+      await unlockAudioOnce(audio);
+      await audio.play();
+      setNeedsSoundGesture(false);
+    } catch (e) {
+      console.error("[tts] manual enable sound failed", e);
+      setNeedsSoundGesture(true);
+    }
+  };
+
   return (
-    <div className="app chatShell">
+    <div className="app chatShell" onPointerDownCapture={triggerAudioUnlock}>
       <header className="header">
         <h1>Custom Workflow Chat</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -303,6 +315,20 @@ export default function App() {
       </main>
 
       {error ? <div className="error">{error}</div> : null}
+      {needsSoundGesture ? (
+        <div className="error">
+          音频被浏览器拦截，请点击启用声音。
+          <button
+            type="button"
+            className="sendBtn"
+            style={{ marginLeft: 8 }}
+            onPointerDown={triggerAudioUnlock}
+            onClick={enableSoundAndReplay}
+          >
+            Enable Sound
+          </button>
+        </div>
+      ) : null}
 
       <form className="composer" onSubmit={handleSubmit}>
         <input
@@ -336,7 +362,7 @@ export default function App() {
         />
       </form>
 
-      <audio ref={audioRef} playsInline />
+      <audio ref={audioRef} playsInline preload="auto" />
 
       {DEBUG_ALLOWED ? (
         debugOpen ? (
