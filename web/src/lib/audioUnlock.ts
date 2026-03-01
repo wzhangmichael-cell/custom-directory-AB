@@ -1,6 +1,6 @@
 let unlocked = false;
 
-export async function unlockAudioOnce() {
+export async function unlockAudioOnce(audioEl?: HTMLAudioElement | null) {
   if (unlocked) return true;
 
   try {
@@ -17,7 +17,7 @@ export async function unlockAudioOnce() {
       source.stop(0.01);
     }
 
-    const a = document.createElement("audio");
+    const a = audioEl ?? document.createElement("audio");
     a.muted = true;
     a.playsInline = true;
     a.src =
@@ -25,6 +25,7 @@ export async function unlockAudioOnce() {
 
     await a.play();
     a.pause();
+    a.currentTime = 0;
     a.muted = false;
 
     unlocked = true;

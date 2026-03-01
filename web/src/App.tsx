@@ -45,6 +45,7 @@ export default function App() {
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const debugEndRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
   const lastSpokenRef = useRef<string>("");
   const voiceBtnRef = useRef<HTMLButtonElement | null>(null);
 
@@ -114,20 +115,24 @@ export default function App() {
     if (!t) return;
 
     if (!isAudioUnlocked()) {
-      await unlockAudioOnce();
+      await unlockAudioOnce(audioRef.current);
     }
 
     // ✅ 去重：同一句不要重复读
     if (t === lastSpokenRef.current) return;
     lastSpokenRef.current = t;
 
+    const audio = audioRef.current;
+    if (!audio) return;
+
     // ✅ 打断上一段
-    if (audioRef.current) {
-      try {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-      } catch {}
-      audioRef.current = null;
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+    } catch {}
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
     }
 
     const res = await fetch(`${API_BASE}/api/tts`, {
@@ -149,13 +154,16 @@ export default function App() {
 
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
+    audioUrlRef.current = url;
+    audio.src = url;
     audio.playsInline = true;
-    audioRef.current = audio;
+    audio.load();
 
     audio.onended = () => {
-      URL.revokeObjectURL(url);
-      if (audioRef.current === audio) audioRef.current = null;
+      if (audioUrlRef.current === url) {
+        URL.revokeObjectURL(url);
+        audioUrlRef.current = null;
+      }
     };
 
     try {
@@ -163,7 +171,10 @@ export default function App() {
     } catch (e) {
       console.error("[tts] play blocked (Safari?)", e);
       // 浏览器可能要求用户交互后才能播放
-      URL.revokeObjectURL(url);
+      if (audioUrlRef.current === url) {
+        URL.revokeObjectURL(url);
+        audioUrlRef.current = null;
+      }
     }
   }
 
@@ -269,7 +280,7 @@ export default function App() {
   };
 
   const triggerAudioUnlock = () => {
-    void unlockAudioOnce();
+    void unlockAudioOnce(audioRef.current);
   };
 
   return (
@@ -316,14 +327,16 @@ export default function App() {
           isRecording={voice.isRecording}
           isTranscribing={voice.isTranscribing}
           onStart={async () => {
-            await voice.start();
             triggerAudioUnlock();
+            await voice.start();
           }}
           onStop={voice.stop}
           right={0}
           bottom={0}
         />
       </form>
+
+      <audio ref={audioRef} playsInline />
 
       {DEBUG_ALLOWED ? (
         debugOpen ? (
