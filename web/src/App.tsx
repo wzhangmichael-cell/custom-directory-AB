@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import VoiceButton from "./components/VoiceButton";
 import { useVoiceInput } from "./lib/useVoiceInput";
 import { connectSSE } from "./lib/sseClient";
+import { isAudioUnlocked, unlockAudioOnce } from "./lib/audioUnlock";
 
 type ChatMessage = {
   id: string;
@@ -46,7 +47,6 @@ export default function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const lastSpokenRef = useRef<string>("");
   const voiceBtnRef = useRef<HTMLButtonElement | null>(null);
-  const audioUnlockedRef = useRef(false);
 
   useEffect(() => {
     if (!debugOpen) return;
@@ -113,6 +113,10 @@ export default function App() {
     const t = text.trim();
     if (!t) return;
 
+    if (!isAudioUnlocked()) {
+      await unlockAudioOnce();
+    }
+
     // ✅ 去重：同一句不要重复读
     if (t === lastSpokenRef.current) return;
     lastSpokenRef.current = t;
@@ -137,6 +141,12 @@ export default function App() {
       return;
     }
 
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.startsWith("audio/")) {
+      console.error("[tts] unexpected content-type", contentType);
+      return;
+    }
+
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
@@ -150,25 +160,12 @@ export default function App() {
 
     try {
       await audio.play();
-    } catch {
+    } catch (e) {
+      console.error("[tts] play blocked (Safari?)", e);
       // 浏览器可能要求用户交互后才能播放
       URL.revokeObjectURL(url);
     }
   }
-
-  const unlockAudio = async () => {
-    if (audioUnlockedRef.current) return;
-    try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      if (ctx.state === "suspended") {
-        await ctx.resume();
-      }
-      await ctx.close();
-      audioUnlockedRef.current = true;
-    } catch {
-      // noop
-    }
-  };
 
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
@@ -297,14 +294,14 @@ export default function App() {
           className="composerInput"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onFocus={unlockAudio}
+          onFocus={unlockAudioOnce}
           placeholder="Type a message"
           disabled={status === "connecting" || status === "streaming"}
         />
         <button
           className="sendBtn"
           type="submit"
-          onPointerDown={unlockAudio}
+          onPointerDown={unlockAudioOnce}
           disabled={status === "connecting" || status === "streaming"}
         >
           Send
@@ -315,7 +312,7 @@ export default function App() {
           isRecording={voice.isRecording}
           isTranscribing={voice.isTranscribing}
           onStart={async () => {
-            await unlockAudio();
+            await unlockAudioOnce();
             await voice.start();
           }}
           onStop={voice.stop}
