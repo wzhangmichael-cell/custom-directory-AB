@@ -65,6 +65,11 @@ async def health() -> dict:
     return {"ok": True}
 
 
+@app.get("/healthz")
+async def healthz() -> dict:
+    return await health()
+
+
 @app.post("/api/chat")
 def chat(req: ChatRequest):
     thread_id = (req.thread_id or "").strip() or "thread_local"
