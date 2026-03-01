@@ -1,0 +1,6 @@
+
+# env (secrets)
+server/.env
+web/.env.local
+.env
+.env.*
