@@ -1,4 +1,5 @@
 let unlocked = false;
+const DEV_MODE = import.meta.env.DEV;
 
 export async function unlockAudioOnce() {
   if (unlocked) return true;
@@ -31,7 +32,7 @@ export async function unlockAudioOnce() {
     unlocked = true;
     return true;
   } catch (e) {
-    console.error("[audio] unlock failed", e);
+    if (DEV_MODE) console.warn("[audio] unlock failed", e);
     return false;
   }
 }

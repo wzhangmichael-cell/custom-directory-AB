@@ -22,6 +22,7 @@ const THREAD_KEY = "thread_id";
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 const DEBUG_ALLOWED = import.meta.env.VITE_SHOW_DEBUG === "true";
+const DEV_MODE = import.meta.env.DEV;
 
 function newId(): string {
   return Math.random().toString(36).slice(2, 10);
@@ -44,6 +45,7 @@ export default function App() {
     () => DEBUG_ALLOWED && new URLSearchParams(window.location.search).get("debug") === "1",
   );
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
+  const shouldLogDebug = DEV_MODE || debugOpen;
   const debugEndRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
@@ -149,7 +151,7 @@ export default function App() {
 
     const contentType = res.headers.get("content-type") || "";
     if (!contentType.startsWith("audio/")) {
-      console.error("[tts] unexpected content-type", contentType);
+      if (shouldLogDebug) console.warn("[tts] unexpected content-type", contentType);
       return;
     }
 
@@ -171,7 +173,7 @@ export default function App() {
       await audio.play();
       setNeedsSoundGesture(false);
     } catch (e) {
-      console.error("[tts] play blocked (Safari?)", e);
+      if (shouldLogDebug) console.warn("[tts] play blocked (Safari/WebKit?)", e);
       // Safari/WebKit may require explicit user gesture for audible playback.
       setNeedsSoundGesture(true);
     }
@@ -192,8 +194,6 @@ export default function App() {
         USE_MOCK ? `${API_BASE}/api/mock` : `${API_BASE}/api/chat`,
         USE_MOCK ? {} : { thread_id: threadId, message: trimmed },
         ({ event, data }) => {
-          console.log("[sse]", event, data);
-
           if (event === "debug" && debugOpen) {
             setDebugEvents((prev) => [
               ...prev,
@@ -289,13 +289,13 @@ export default function App() {
       await audio.play();
       setNeedsSoundGesture(false);
     } catch (e) {
-      console.error("[tts] manual play failed", e);
+      if (shouldLogDebug) console.warn("[tts] manual play failed", e);
       try {
         await unlockAudioOnce();
         await audio.play();
         setNeedsSoundGesture(false);
       } catch (err) {
-        console.error("[tts] manual enable sound failed", err);
+        if (shouldLogDebug) console.warn("[tts] manual enable sound failed", err);
         setNeedsSoundGesture(true);
       }
     }
@@ -323,7 +323,7 @@ export default function App() {
       {error ? <div className="error">{error}</div> : null}
       {needsSoundGesture ? (
         <div className="error">
-          音频被浏览器拦截，请点击启用声音。
+          Voice playback is paused by browser settings.
           <button
             type="button"
             className="sendBtn"
@@ -331,7 +331,7 @@ export default function App() {
             onPointerDown={triggerAudioUnlock}
             onClick={enableSoundAndReplay}
           >
-            Enable Sound
+            Enable Voice
           </button>
         </div>
       ) : null}
