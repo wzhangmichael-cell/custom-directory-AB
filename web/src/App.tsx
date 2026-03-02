@@ -41,6 +41,8 @@ export default function App() {
   const [error, setError] = useState<string>("");
   const [needsSoundGesture, setNeedsSoundGesture] = useState(false);
   const [isMainOverflowing, setIsMainOverflowing] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 768px)").matches);
   const [threadId, setThreadId] = useState<string | null>(() => {
     try {
       return localStorage.getItem(THREAD_KEY);
@@ -55,10 +57,18 @@ export default function App() {
   const shouldLogDebug = DEV_MODE || debugOpen;
   const debugEndRef = useRef<HTMLDivElement | null>(null);
   const mainScrollRef = useRef<HTMLElement | null>(null);
+  const composerRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const lastSpokenRef = useRef<string>("");
   const voiceBtnRef = useRef<HTMLButtonElement | null>(null);
+  const keyboardOffsetRef = useRef<number>(0);
+  const keyboardRafRef = useRef<number | null>(null);
+  const focusStabilizeUntilRef = useRef<number>(0);
+  const composerFocusedRef = useRef<boolean>(false);
+  const scrollLockRafRef = useRef<number | null>(null);
+  const lockedScrollTopRef = useRef<number>(0);
+  const [composerHeight, setComposerHeight] = useState<number>(96);
 
   useEffect(() => {
     if (!debugOpen) return;
@@ -66,17 +76,84 @@ export default function App() {
   }, [debugEvents, debugOpen]);
 
   useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 768px)");
+    const onChange = (event: MediaQueryListEvent) => setIsMobile(event.matches);
+
+    setIsMobile(mediaQuery.matches);
+    mediaQuery.addEventListener("change", onChange);
+    return () => mediaQuery.removeEventListener("change", onChange);
+  }, []);
+
+  useEffect(() => {
     const setHeightVar = () => {
-      const height = window.visualViewport?.height ?? window.innerHeight;
+      const height = window.innerHeight;
       document.documentElement.style.setProperty("--app-height", `${Math.round(height)}px`);
     };
 
     setHeightVar();
     window.addEventListener("resize", setHeightVar);
-    window.visualViewport?.addEventListener("resize", setHeightVar);
     return () => {
       window.removeEventListener("resize", setHeightVar);
-      window.visualViewport?.removeEventListener("resize", setHeightVar);
+    };
+  }, []);
+
+  useEffect(() => {
+    const applyKeyboardOffset = () => {
+      const viewport = window.visualViewport;
+      if (!viewport) {
+        keyboardOffsetRef.current = 0;
+        document.documentElement.style.setProperty("--keyboard-offset", "0px");
+        return;
+      }
+
+      // iOS keyboard animation may shift visual viewport top and height at the same time.
+      // Using both values avoids counting top-bar motion as keyboard height.
+      const rawOffset = window.innerHeight - (viewport.height + viewport.offsetTop);
+      const normalizedOffset = rawOffset > 80 ? Math.max(0, rawOffset) : 0;
+      const maxReasonableOffset = Math.round(window.innerHeight * 0.55);
+      const baseTargetOffset = Math.min(normalizedOffset, maxReasonableOffset);
+      const current = keyboardOffsetRef.current;
+      const inFocusStabilizing =
+        composerFocusedRef.current && Date.now() < focusStabilizeUntilRef.current;
+      const targetOffset =
+        inFocusStabilizing && baseTargetOffset < current ? current : baseTargetOffset;
+      const holdOffsetWhileFocused =
+        composerFocusedRef.current && current > 0 && targetOffset < current;
+      const effectiveTargetOffset = holdOffsetWhileFocused ? current : targetOffset;
+      const delta = effectiveTargetOffset - current;
+      const maxStep = effectiveTargetOffset === 0 ? 36 : inFocusStabilizing ? 16 : 24;
+      const step = Math.max(-maxStep, Math.min(maxStep, delta));
+      const keyboardOffset = current + step;
+
+      keyboardOffsetRef.current = keyboardOffset;
+      document.documentElement.style.setProperty(
+        "--keyboard-offset",
+        `${Math.round(Math.max(0, keyboardOffset))}px`,
+      );
+    };
+
+    const scheduleKeyboardOffset = () => {
+      if (keyboardRafRef.current !== null) {
+        window.cancelAnimationFrame(keyboardRafRef.current);
+      }
+      keyboardRafRef.current = window.requestAnimationFrame(() => {
+        keyboardRafRef.current = null;
+        applyKeyboardOffset();
+      });
+    };
+
+    applyKeyboardOffset();
+    window.addEventListener("resize", scheduleKeyboardOffset);
+    window.visualViewport?.addEventListener("resize", scheduleKeyboardOffset);
+    return () => {
+      if (keyboardRafRef.current !== null) {
+        window.cancelAnimationFrame(keyboardRafRef.current);
+      }
+      if (scrollLockRafRef.current !== null) {
+        window.cancelAnimationFrame(scrollLockRafRef.current);
+      }
+      window.removeEventListener("resize", scheduleKeyboardOffset);
+      window.visualViewport?.removeEventListener("resize", scheduleKeyboardOffset);
     };
   }, []);
 
@@ -96,6 +173,50 @@ export default function App() {
       window.visualViewport?.removeEventListener("resize", checkOverflow);
     };
   }, [messages, error, needsSoundGesture, status]);
+
+  useEffect(() => {
+    const node = composerRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+
+    const updateComposerHeight = () => {
+      // Freeze measured composer height while keyboard is opening/open,
+      // so main content bottom padding does not jump for a single frame.
+      if (composerFocusedRef.current) return;
+      setComposerHeight(Math.round(node.getBoundingClientRect().height));
+    };
+
+    const observer = new ResizeObserver(() => updateComposerHeight());
+    observer.observe(node);
+    updateComposerHeight();
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!composerFocused) return;
+
+    const lockBody = () => {
+      document.body.style.overflow = "hidden";
+      document.body.style.touchAction = "none";
+      document.documentElement.style.overscrollBehavior = "none";
+      window.scrollTo(0, 0);
+    };
+
+    const preventBackgroundTouchMove = (event: TouchEvent) => {
+      const target = event.target as Node | null;
+      const composerNode = composerRef.current;
+      if (target && composerNode?.contains(target)) return;
+      event.preventDefault();
+    };
+
+    lockBody();
+    document.addEventListener("touchmove", preventBackgroundTouchMove, { passive: false });
+    return () => {
+      document.removeEventListener("touchmove", preventBackgroundTouchMove);
+      document.body.style.overflow = "";
+      document.body.style.touchAction = "";
+      document.documentElement.style.overscrollBehavior = "";
+    };
+  }, [composerFocused]);
 
   const pushDelta = (delta: string) => {
     setMessages((prev) => {
@@ -310,6 +431,48 @@ export default function App() {
     void unlockAudioOnce();
   };
 
+  const lockMainScrollBriefly = () => {
+    const node = mainScrollRef.current;
+    if (!node) return;
+
+    const lockUntil = Date.now() + 280;
+    lockedScrollTopRef.current = node.scrollTop;
+
+    if (scrollLockRafRef.current !== null) {
+      window.cancelAnimationFrame(scrollLockRafRef.current);
+    }
+
+    const keepLocked = () => {
+      const currentNode = mainScrollRef.current;
+      if (currentNode) {
+        currentNode.scrollTop = lockedScrollTopRef.current;
+      }
+      if (Date.now() < lockUntil) {
+        scrollLockRafRef.current = window.requestAnimationFrame(keepLocked);
+      } else {
+        scrollLockRafRef.current = null;
+      }
+    };
+
+    scrollLockRafRef.current = window.requestAnimationFrame(keepLocked);
+  };
+
+  const handleComposerFocus = () => {
+    triggerAudioUnlock();
+    setComposerFocused(true);
+    composerFocusedRef.current = true;
+    focusStabilizeUntilRef.current = Date.now() + 280;
+    lockMainScrollBriefly();
+    // iOS may auto-scroll focused fields; force viewport back to top immediately.
+    window.requestAnimationFrame(() => window.scrollTo(0, 0));
+  };
+
+  const handleComposerBlur = () => {
+    setComposerFocused(false);
+    composerFocusedRef.current = false;
+    focusStabilizeUntilRef.current = 0;
+  };
+
   const enableSoundAndReplay = async () => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -330,10 +493,10 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-dvh bg-muted/30 p-0 text-foreground sm:p-4" onPointerDownCapture={triggerAudioUnlock}>
-      <div className="flex h-[var(--app-height)] justify-center sm:h-auto">
-        <div className="w-full sm:w-[1133px]">
-        <Card className="flex h-[var(--app-height)] min-h-0 flex-col overflow-hidden rounded-none sm:h-[744px] sm:rounded-xl">
+    <div className="h-[var(--app-height)] overflow-hidden bg-muted/30 p-0 text-foreground sm:p-4" onPointerDownCapture={triggerAudioUnlock}>
+      <div className="flex h-full justify-center overflow-hidden">
+        <div className="h-full w-full sm:w-[1133px]">
+        <Card className="flex h-full flex-col overflow-hidden rounded-none sm:h-[744px] sm:rounded-xl">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div className="flex items-center gap-2">
               <div className="text-base font-semibold">AisleBay Chat</div>
@@ -348,16 +511,21 @@ export default function App() {
             </Badge>
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <main
               ref={mainScrollRef}
               className={[
-                "min-h-0 flex-1 overscroll-contain px-4 py-6",
-                isMainOverflowing ? "overflow-y-auto" : "overflow-y-hidden",
+                "min-h-0 flex-1 overscroll-contain px-4 pt-6",
+                composerFocused
+                  ? "overflow-y-hidden"
+                  : isMainOverflowing
+                    ? "overflow-y-auto"
+                    : "overflow-y-hidden",
               ].join(" ")}
+              style={{ paddingBottom: `${composerHeight + 12}px` }}
             >
               {messages.length === 0 ? (
-                <div className="flex h-full items-center justify-center text-center">
+                <div className="flex h-full items-center justify-center text-center sm:-translate-y-6">
                   <div className="text-2xl font-bold">What can I help you find today?</div>
                 </div>
               ) : (
@@ -417,14 +585,22 @@ export default function App() {
               ) : null}
             </main>
 
-            <div className="bg-background px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3">
-              <form onSubmit={handleSubmit} className="flex items-center gap-2 rounded-[28px] border bg-background px-2 py-1">
+            <div
+              ref={composerRef}
+              className="fixed inset-x-0 z-20 bg-background px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 sm:absolute sm:left-0 sm:right-0"
+              style={{
+                bottom: 0,
+                paddingBottom: "max(12px, env(safe-area-inset-bottom), var(--keyboard-offset))",
+              }}
+            >
+              <form onSubmit={handleSubmit} className="mx-auto flex max-w-[1133px] items-center gap-2 rounded-[28px] border bg-background px-2 py-1">
                 <Textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleComposerKeyDown}
-                  onFocus={triggerAudioUnlock}
-                  placeholder="Type a message..."
+                  onFocus={handleComposerFocus}
+                  onBlur={handleComposerBlur}
+                  placeholder={isMobile ? "Type or speak to find items…" : "Type or speak to find items, check availability, or get quick help..."}
                   disabled={status === "connecting" || status === "streaming"}
                   className="h-11 min-h-11 max-h-11 resize-none rounded-2xl border-0 bg-transparent px-3 py-[11px] leading-[22px] text-[#282828] placeholder:text-[#282828]/60 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                 />

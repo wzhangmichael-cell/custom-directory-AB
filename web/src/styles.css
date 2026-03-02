@@ -8,6 +8,7 @@
   background: #f2f6fb;
   color: #1e293b;
   --app-height: 100vh;
+  --keyboard-offset: 0px;
 }
 
 html,
@@ -31,9 +32,9 @@ body {
 
 #root {
   width: 100%;
-  min-height: 100vh;
-  min-height: 100dvh;
-  min-height: var(--app-height);
+  height: 100vh;
+  height: 100dvh;
+  height: var(--app-height);
   display: flex;
   justify-content: center;
   padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
@@ -272,7 +273,7 @@ body {
 
   .debugFab {
     left: 8px;
-    top: 16px;
+    top: 56px;
   }
 }
 
