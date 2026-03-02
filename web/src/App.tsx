@@ -333,7 +333,7 @@ export default function App() {
     <div className="min-h-dvh bg-muted/30 p-4 text-foreground" onPointerDownCapture={triggerAudioUnlock}>
       <div className="flex justify-center">
         <div className="w-[1133px]">
-        <Card className="h-[744px] overflow-hidden">
+        <Card className="flex h-[744px] flex-col overflow-hidden">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div className="flex items-center gap-2">
               <div className="text-base font-semibold">AisleBay Chat</div>
@@ -348,11 +348,11 @@ export default function App() {
             </Badge>
           </div>
 
-          <div className="flex h-full flex-col">
+          <div className="flex min-h-0 flex-1 flex-col">
             <main
               ref={mainScrollRef}
               className={[
-                "flex-1 overscroll-contain px-4 py-6",
+                "min-h-0 flex-1 overscroll-contain px-4 py-6",
                 isMainOverflowing ? "overflow-y-auto" : "overflow-y-hidden",
               ].join(" ")}
             >
@@ -417,8 +417,8 @@ export default function App() {
               ) : null}
             </main>
 
-            <div className="bg-background px-4 pb-8 pt-3">
-              <form onSubmit={handleSubmit} className="-mt-[85px] flex items-center gap-2 rounded-[28px] border bg-background px-2 py-1">
+            <div className="bg-background px-4 pb-3 pt-3">
+              <form onSubmit={handleSubmit} className="flex items-center gap-2 rounded-[28px] border bg-background px-2 py-1">
                 <Textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
