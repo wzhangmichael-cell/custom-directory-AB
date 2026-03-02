@@ -426,7 +426,7 @@ export default function App() {
                   onFocus={triggerAudioUnlock}
                   placeholder="Type a message..."
                   disabled={status === "connecting" || status === "streaming"}
-                  className="h-11 min-h-11 max-h-11 resize-none rounded-2xl border-0 bg-transparent px-3 py-[10px] leading-6 text-[#282828] placeholder:text-[#282828]/60 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                  className="h-11 min-h-11 max-h-11 resize-none rounded-2xl border-0 bg-transparent px-3 py-[11px] leading-[22px] text-[#282828] placeholder:text-[#282828]/60 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                 />
 
                 <div className="flex items-center gap-1">
