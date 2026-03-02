@@ -330,10 +330,10 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-dvh bg-muted/30 p-4 text-foreground" onPointerDownCapture={triggerAudioUnlock}>
-      <div className="flex justify-center">
-        <div className="w-[1133px]">
-        <Card className="flex h-[744px] flex-col overflow-hidden">
+    <div className="min-h-dvh bg-muted/30 p-0 text-foreground sm:p-4" onPointerDownCapture={triggerAudioUnlock}>
+      <div className="flex h-[var(--app-height)] justify-center sm:h-auto">
+        <div className="w-full sm:w-[1133px]">
+        <Card className="flex h-[var(--app-height)] min-h-0 flex-col overflow-hidden rounded-none sm:h-[744px] sm:rounded-xl">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div className="flex items-center gap-2">
               <div className="text-base font-semibold">AisleBay Chat</div>
@@ -417,7 +417,7 @@ export default function App() {
               ) : null}
             </main>
 
-            <div className="bg-background px-4 pb-3 pt-3">
+            <div className="bg-background px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3">
               <form onSubmit={handleSubmit} className="flex items-center gap-2 rounded-[28px] border bg-background px-2 py-1">
                 <Textarea
                   value={input}
