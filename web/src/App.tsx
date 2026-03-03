@@ -5,22 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ArrowUp, RotateCw } from "lucide-react";
 import VoiceButton from "./components/VoiceButton";
 import { useVoiceInput } from "./lib/useVoiceInput";
-import { connectSSE } from "./lib/sseClient";
-import { isAudioUnlocked, unlockAudioOnce } from "./lib/audioUnlock";
-
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-};
-
-type DebugEvent = {
-  ts: number;
-  node: string;
-  payload: unknown;
-};
-
-type Status = "idle" | "connecting" | "streaming" | "error";
+import { useChatSession } from "./hooks/useChatSession";
 
 const THREAD_KEY = "thread_id";
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
@@ -28,43 +13,45 @@ const API_BASE = import.meta.env.VITE_API_BASE || "";
 const DEV_MODE = import.meta.env.DEV;
 const DEBUG_QUERY_ENABLED = new URLSearchParams(window.location.search).get("debug") === "1";
 const DEBUG_ALLOWED = import.meta.env.VITE_SHOW_DEBUG === "true" || DEV_MODE || DEBUG_QUERY_ENABLED;
-
-function newId(): string {
-  return Math.random().toString(36).slice(2, 10);
-}
+const SCROLL_BUFFER_PX = 28;
 
 export default function App() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [status, setStatus] = useState<Status>("idle");
-  const [error, setError] = useState<string>("");
-  const [needsSoundGesture, setNeedsSoundGesture] = useState(false);
-  const [isMainOverflowing, setIsMainOverflowing] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
+  const [isSmallRangeScroll, setIsSmallRangeScroll] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 1024px)").matches);
   const [isStandalone, setIsStandalone] = useState(() => {
     const standaloneMatch = window.matchMedia("(display-mode: standalone)").matches;
     const iosStandalone = Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
     return standaloneMatch || iosStandalone;
   });
-  const [threadId, setThreadId] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem(THREAD_KEY);
-    } catch {
-      return null;
-    }
-  });
   const [debugOpen, setDebugOpen] = useState<boolean>(
     () => DEBUG_ALLOWED && DEBUG_QUERY_ENABLED,
   );
-  const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const shouldLogDebug = DEV_MODE || debugOpen;
+  const {
+    audioRef,
+    clearDebugEvents,
+    debugEvents,
+    enableSoundAndReplay,
+    error,
+    messages,
+    needsSoundGesture,
+    resetChat,
+    sendMessage,
+    showAssistantCue,
+    status,
+    triggerAudioUnlock,
+  } = useChatSession({
+    apiBase: API_BASE,
+    useMock: USE_MOCK,
+    threadKey: THREAD_KEY,
+    debugOpen,
+    shouldLogDebug,
+  });
   const debugEndRef = useRef<HTMLDivElement | null>(null);
   const mainScrollRef = useRef<HTMLElement | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioUrlRef = useRef<string | null>(null);
-  const lastSpokenRef = useRef<string>("");
   const voiceBtnRef = useRef<HTMLButtonElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const keyboardOffsetRef = useRef<number>(0);
@@ -74,10 +61,10 @@ export default function App() {
   const scrollLockRafRef = useRef<number | null>(null);
   const lockedScrollTopRef = useRef<number>(0);
   const [composerHeight, setComposerHeight] = useState<number>(96);
-  const [showAssistantCue, setShowAssistantCue] = useState(false);
   const stableAppHeightRef = useRef<number>(Math.round(window.innerHeight));
   const applyAppHeightRef = useRef<() => void>(() => {});
   const freezeAppHeightRef = useRef<boolean>(false);
+  const hasMessages = messages.length > 0;
 
   useEffect(() => {
     if (!debugOpen) return;
@@ -208,21 +195,65 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const checkOverflow = () => {
-      const node = mainScrollRef.current;
-      if (!node) return;
-      setIsMainOverflowing(node.scrollHeight > node.clientHeight + 1);
+    const node = mainScrollRef.current;
+    if (!node || composerFocused || !hasMessages) return;
+
+    // "Small-range scroll mode": only the top/bottom spacer contributes to overflow.
+    const smallRangeMode = node.scrollHeight <= node.clientHeight + SCROLL_BUFFER_PX * 2 + 2;
+    if (!smallRangeMode) return;
+
+    // Keep the resting position at the middle so users can swipe up/down slightly.
+    node.scrollTop = SCROLL_BUFFER_PX;
+  }, [composerFocused, hasMessages, isSmallRangeScroll]);
+
+  useEffect(() => {
+    const node = mainScrollRef.current;
+    if (!node || !hasMessages) {
+      setIsSmallRangeScroll(false);
+      return;
+    }
+
+    const measure = () => {
+      const contentNode = node.querySelector(".chatScrollContent") as HTMLDivElement | null;
+      if (!contentNode) {
+        setIsSmallRangeScroll(true);
+        return;
+      }
+
+      const mainStyle = window.getComputedStyle(node);
+      const mainPaddingTop = parseFloat(mainStyle.paddingTop || "0") || 0;
+      const mainPaddingBottom = parseFloat(mainStyle.paddingBottom || "0") || 0;
+      const visibleContentHeight = Math.max(0, node.clientHeight - mainPaddingTop - mainPaddingBottom);
+
+      const contentStyle = window.getComputedStyle(contentNode);
+      const contentPaddingTop = parseFloat(contentStyle.paddingTop || "0") || 0;
+      const contentPaddingBottom = parseFloat(contentStyle.paddingBottom || "0") || 0;
+      const naturalContentHeight = Math.max(
+        0,
+        contentNode.scrollHeight - contentPaddingTop - contentPaddingBottom,
+      );
+
+      const smallRangeMode = naturalContentHeight <= visibleContentHeight + 1;
+      setIsSmallRangeScroll(smallRangeMode);
     };
 
-    const id = window.requestAnimationFrame(checkOverflow);
-    window.addEventListener("resize", checkOverflow);
-    window.visualViewport?.addEventListener("resize", checkOverflow);
+    const id = window.requestAnimationFrame(measure);
+    window.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("resize", measure);
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(measure);
+      observer.observe(node);
+    }
+
     return () => {
       window.cancelAnimationFrame(id);
-      window.removeEventListener("resize", checkOverflow);
-      window.visualViewport?.removeEventListener("resize", checkOverflow);
+      window.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("resize", measure);
+      observer?.disconnect();
     };
-  }, [messages, error, needsSoundGesture, status]);
+  }, [hasMessages, messages, error, needsSoundGesture, showAssistantCue, status, composerHeight, composerFocused]);
 
   useEffect(() => {
     const node = composerRef.current;
@@ -254,190 +285,29 @@ export default function App() {
     const preventBackgroundTouchMove = (event: TouchEvent) => {
       const target = event.target as Node | null;
       const composerNode = composerRef.current;
+      const mainNode = mainScrollRef.current;
       if (target && composerNode?.contains(target)) return;
+      if (target && mainNode?.contains(target) && hasMessages) return;
       event.preventDefault();
     };
 
     lockBody();
     document.addEventListener("touchmove", preventBackgroundTouchMove, { passive: false });
+
+    const preventComposerDrag = (event: TouchEvent) => {
+      event.preventDefault();
+    };
+
+    const composerNode = composerRef.current;
+    composerNode?.addEventListener("touchmove", preventComposerDrag, { passive: false });
     return () => {
       document.removeEventListener("touchmove", preventBackgroundTouchMove);
+      composerNode?.removeEventListener("touchmove", preventComposerDrag);
       document.body.style.overflow = "";
       document.body.style.touchAction = "";
       document.documentElement.style.overscrollBehavior = "";
     };
-  }, [composerFocused]);
-
-  const pushDelta = (delta: string) => {
-    setMessages((prev) => {
-      const next = [...prev];
-      const last = next[next.length - 1];
-
-      // 如果最后一条不是 assistant（或还没有），就新建一条 assistant
-      if (!last || last.role !== "assistant") {
-        next.push({ id: newId(), role: "assistant", content: delta });
-        return next;
-      }
-
-      // 否则追加到最后一条 assistant
-      next[next.length - 1] = { ...last, content: last.content + delta };
-      return next;
-    });
-  };
-
-  async function playTTS(text: string) {
-    const t = text.trim();
-    if (!t) return;
-
-    if (!isAudioUnlocked()) {
-      void unlockAudioOnce();
-    }
-
-    // ✅ 去重：同一句不要重复读
-    if (t === lastSpokenRef.current) return;
-    lastSpokenRef.current = t;
-
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    // ✅ 打断上一段
-    try {
-      audio.pause();
-      audio.currentTime = 0;
-    } catch {}
-    if (audioUrlRef.current) {
-      URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = null;
-    }
-
-    const res = await fetch(`${API_BASE}/api/tts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: t, voice: "alloy", format: "mp3" }),
-    });
-
-    if (!res.ok) {
-      // 不影响聊天，只是不播
-      return;
-    }
-
-    const contentType = res.headers.get("content-type") || "";
-    if (!contentType.startsWith("audio/")) {
-      if (shouldLogDebug) console.warn("[tts] unexpected content-type", contentType);
-      return;
-    }
-
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    audioUrlRef.current = url;
-    audio.src = url;
-    audio.playsInline = true;
-    audio.load();
-
-    audio.onended = () => {
-      if (audioUrlRef.current === url) {
-        URL.revokeObjectURL(url);
-        audioUrlRef.current = null;
-      }
-    };
-
-    try {
-      await audio.play();
-      setNeedsSoundGesture(false);
-    } catch (e) {
-      if (shouldLogDebug) console.warn("[tts] play blocked (Safari/WebKit?)", e);
-      // Safari/WebKit may require explicit user gesture for audible playback.
-      setNeedsSoundGesture(true);
-    }
-  }
-
-  const sendMessage = async (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-
-    setError("");
-    setStatus("connecting");
-    setShowAssistantCue(true);
-    if (debugOpen) setDebugEvents([]);
-
-    setMessages((prev) => [...prev, { id: newId(), role: "user", content: trimmed }]);
-
-    try {
-      await connectSSE(
-        USE_MOCK ? `${API_BASE}/api/mock` : `${API_BASE}/api/chat`,
-        USE_MOCK ? {} : { thread_id: threadId, message: trimmed },
-        ({ event, data }) => {
-          if (event === "debug" && debugOpen) {
-            setDebugEvents((prev) => [
-              ...prev,
-              {
-                ts: Date.now(),
-                node: typeof data?.node === "string" ? data.node : "unknown",
-                payload: data?.payload,
-              },
-            ]);
-            return;
-          }
-
-          if (event === "delta") {
-            const chunk = typeof data?.text === "string" ? data.text : "";
-            if (chunk) {
-              setShowAssistantCue(false);
-              setStatus("streaming");
-              pushDelta(chunk);
-            }
-            return;
-          }
-
-          if (event === "done") {
-            const nextThreadId = typeof data?.thread_id === "string" ? data.thread_id : null;
-            const finalText = typeof data?.text === "string" ? data.text : "";
-
-            if (finalText) {
-              setShowAssistantCue(false);
-              setMessages((prev) => {
-                const next = [...prev];
-                const last = next[next.length - 1];
-                if (!last || last.role !== "assistant") {
-                  next.push({ id: newId(), role: "assistant", content: finalText });
-                } else {
-                  next[next.length - 1] = { ...last, content: finalText };
-                }
-                return next;
-              });
-
-              // ✅ 自动朗读
-              playTTS(finalText);
-            }
-
-            if (nextThreadId && !USE_MOCK) {
-              try {
-                localStorage.setItem(THREAD_KEY, nextThreadId);
-              } catch {
-                // ignore storage failures (e.g. Safari private mode)
-              }
-              setThreadId(nextThreadId);
-            }
-            setStatus("idle");
-            setShowAssistantCue(false);
-            return;
-          }
-
-          if (event === "error") {
-            const message = typeof data?.message === "string" ? data.message : "Unknown error";
-            setError(message);
-            setStatus("error");
-            setShowAssistantCue(false);
-          }
-        },
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown network error";
-      setError(message);
-      setStatus("error");
-      setShowAssistantCue(false);
-    }
-  };
+  }, [composerFocused, hasMessages]);
 
   const voice = useVoiceInput({
     sttUrl: `${API_BASE}/api/stt`,
@@ -464,10 +334,6 @@ export default function App() {
     e.preventDefault();
     if (status === "connecting" || status === "streaming") return;
     void submitCurrentInput();
-  };
-
-  const triggerAudioUnlock = () => {
-    void unlockAudioOnce();
   };
 
   const lockMainScrollBriefly = () => {
@@ -548,40 +414,9 @@ export default function App() {
     }
   };
 
-  const enableSoundAndReplay = async () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    try {
-      await audio.play();
-      setNeedsSoundGesture(false);
-    } catch (e) {
-      if (shouldLogDebug) console.warn("[tts] manual play failed", e);
-      try {
-        await unlockAudioOnce();
-        await audio.play();
-        setNeedsSoundGesture(false);
-      } catch (err) {
-        if (shouldLogDebug) console.warn("[tts] manual enable sound failed", err);
-        setNeedsSoundGesture(true);
-      }
-    }
-  };
-
-  const resetChat = () => {
-    setMessages([]);
+  const resetChatAndInput = () => {
     setInput("");
-    setError("");
-    setStatus("idle");
-    setShowAssistantCue(false);
-    setNeedsSoundGesture(false);
-    setDebugEvents([]);
-    setThreadId(null);
-
-    try {
-      localStorage.removeItem(THREAD_KEY);
-    } catch {
-      // ignore storage failures (e.g. Safari private mode)
-    }
+    resetChat();
   };
 
   return (
@@ -600,7 +435,7 @@ export default function App() {
               type="button"
               variant="secondary"
               className="mr-2 h-7 w-7 rounded-full p-0 lg:mr-2 lg:h-9 lg:w-9"
-              onClick={resetChat}
+              onClick={resetChatAndInput}
               disabled={status === "connecting" || status === "streaming"}
               aria-label="Refresh chat"
               title="Refresh chat"
@@ -613,98 +448,100 @@ export default function App() {
             <main
               ref={mainScrollRef}
               className={[
-                "min-h-0 flex-1 overscroll-contain px-4 pt-6",
-                composerFocused
-                  ? "overflow-y-hidden"
-                  : isMainOverflowing
-                    ? "overflow-y-auto"
-                    : "overflow-y-hidden",
+                "chatScroll min-h-0 flex-1 overscroll-contain px-4 pt-6",
+                hasMessages && isSmallRangeScroll ? "chatScrollBuffered" : "",
+                !isSmallRangeScroll ? "chatScrollNoSnap" : "",
+                !hasMessages
+                  ? "flex items-center justify-center overflow-y-hidden"
+                  : "overflow-y-auto",
               ].join(" ")}
-              style={{ paddingBottom: `${composerHeight + 12}px` }}
+              style={{ paddingBottom: `calc(${composerHeight + 12}px + var(--keyboard-offset))` }}
             >
-              {messages.length === 0 ? (
-                <div
-                  className="flex h-full items-center justify-center text-center sm:-translate-y-6"
-                  style={
-                    isMobile
-                      ? {
+              <div className={hasMessages ? "chatScrollContent" : undefined}>
+                {messages.length === 0 ? (
+                  <div
+                    className="w-full text-center sm:-translate-y-6"
+                    style={
+                      isMobile
+                        ? {
                           transform: composerFocused
-                            ? "translateY(calc(-24px - (var(--keyboard-offset) * 0.28)))"
-                            : "translateY(-24px)",
+                            ? "translateY(calc(-2px - (var(--keyboard-offset) * 0.02)))"
+                            : "translateY(0px)",
                         }
                       : undefined
-                  }
-                >
-                  <div className="text-2xl font-bold">What can I help you find today?</div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {messages.map((msg) => {
-                    const isUser = msg.role === "user";
-                    return (
-                      <div
-                        key={msg.id}
-                        className={`flex w-full ${isUser ? "justify-end" : "justify-start"}`}
-                      >
+                    }
+                  >
+                    <div className="text-2xl font-bold">What can I help you find today?</div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {messages.map((msg) => {
+                      const isUser = msg.role === "user";
+                      return (
                         <div
-                          className={[
-                            "max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm",
-                            isUser
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted text-foreground",
-                          ].join(" ")}
+                          key={msg.id}
+                          className={`flex w-full ${isUser ? "justify-end" : "justify-start"}`}
                         >
-                          <div className="whitespace-pre-wrap break-words">
-                            {msg.content || "..."}
+                          <div
+                            className={[
+                              "max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm",
+                              isUser
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted text-foreground",
+                            ].join(" ")}
+                          >
+                            <div className="whitespace-pre-wrap break-words">
+                              {msg.content || "..."}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {error || needsSoundGesture ? (
-                <div className="mt-4 space-y-2">
-                  {error ? (
-                    <Card className="border-destructive/40">
-                      <CardContent className="p-3 text-sm text-destructive">
-                        {error}
-                      </CardContent>
-                    </Card>
-                  ) : null}
-
-                  {needsSoundGesture ? (
-                    <Card className="border-amber-500/30">
-                      <CardContent className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="text-sm text-amber-700 dark:text-amber-300">
-                          Voice playback is paused by browser settings.
-                        </div>
-                        <Button
-                          type="button"
-                          onPointerDown={triggerAudioUnlock}
-                          onClick={enableSoundAndReplay}
-                        >
-                          Enable Voice
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {showAssistantCue && (status === "connecting" || status === "streaming") ? (
-                <div className="mt-[30px] flex w-full justify-start">
-                  <div className="assistantCueBubble" aria-live="polite" aria-label="AI is preparing a response">
-                    <span className="assistantCueDot" />
+                      );
+                    })}
                   </div>
-                </div>
-              ) : null}
+                )}
+
+                {error || needsSoundGesture ? (
+                  <div className="mt-4 space-y-2">
+                    {error ? (
+                      <Card className="border-destructive/40">
+                        <CardContent className="p-3 text-sm text-destructive">
+                          {error}
+                        </CardContent>
+                      </Card>
+                    ) : null}
+
+                    {needsSoundGesture ? (
+                      <Card className="border-amber-500/30">
+                        <CardContent className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="text-sm text-amber-700 dark:text-amber-300">
+                            Voice playback is paused by browser settings.
+                          </div>
+                          <Button
+                            type="button"
+                            onPointerDown={triggerAudioUnlock}
+                            onClick={enableSoundAndReplay}
+                          >
+                            Enable Voice
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {showAssistantCue && (status === "connecting" || status === "streaming") ? (
+                  <div className="mt-[30px] flex w-full justify-start">
+                    <div className="assistantCueBubble" aria-live="polite" aria-label="AI is preparing a response">
+                      <span className="assistantCueDot" />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </main>
 
             <div
               ref={composerRef}
-              className="fixed inset-x-0 z-20 bg-background px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 lg:absolute lg:left-0 lg:right-0"
+              className="absolute inset-x-0 z-20 bg-background px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3"
               style={{
                 bottom: 0,
                 paddingBottom: "max(12px, env(safe-area-inset-bottom), var(--keyboard-offset))",
@@ -771,7 +608,7 @@ export default function App() {
             <div className="debugHeader">
               <b>Debug Trace</b>
               <div style={{ display: "flex", gap: 8 }}>
-                <button type="button" onClick={() => setDebugEvents([])}>Clear</button>
+                <button type="button" onClick={clearDebugEvents}>Clear</button>
                 <button type="button" onClick={() => setDebugOpen(false)}>Hide</button>
               </div>
             </div>

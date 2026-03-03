@@ -59,6 +59,38 @@ body {
   position: relative;
 }
 
+.chatScroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.chatScrollBuffered::before,
+.chatScrollBuffered::after {
+  content: "";
+  display: block;
+  height: 28px;
+}
+
+.chatScrollBuffered {
+  scroll-snap-type: y mandatory;
+}
+
+.chatScrollBuffered .chatScrollContent {
+  min-height: 100%;
+  padding-top: 28px;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+.chatScrollNoSnap {
+  scroll-snap-type: none;
+}
+
+.chatScrollNoSnap .chatScrollContent {
+  scroll-snap-align: none;
+  scroll-snap-stop: normal;
+}
+
 .header {
   display: flex;
   justify-content: space-between;
