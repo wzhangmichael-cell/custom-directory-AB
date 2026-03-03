@@ -1,9 +1,8 @@
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { Badge } from "@/components/ui/badge";
+import { FormEvent, KeyboardEvent, PointerEvent, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, RotateCw } from "lucide-react";
 import VoiceButton from "./components/VoiceButton";
 import { useVoiceInput } from "./lib/useVoiceInput";
 import { connectSSE } from "./lib/sseClient";
@@ -42,7 +41,12 @@ export default function App() {
   const [needsSoundGesture, setNeedsSoundGesture] = useState(false);
   const [isMainOverflowing, setIsMainOverflowing] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
-  const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 768px)").matches);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 1024px)").matches);
+  const [isStandalone, setIsStandalone] = useState(() => {
+    const standaloneMatch = window.matchMedia("(display-mode: standalone)").matches;
+    const iosStandalone = Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
+    return standaloneMatch || iosStandalone;
+  });
   const [threadId, setThreadId] = useState<string | null>(() => {
     try {
       return localStorage.getItem(THREAD_KEY);
@@ -62,6 +66,7 @@ export default function App() {
   const audioUrlRef = useRef<string | null>(null);
   const lastSpokenRef = useRef<string>("");
   const voiceBtnRef = useRef<HTMLButtonElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const keyboardOffsetRef = useRef<number>(0);
   const keyboardRafRef = useRef<number | null>(null);
   const focusStabilizeUntilRef = useRef<number>(0);
@@ -69,6 +74,10 @@ export default function App() {
   const scrollLockRafRef = useRef<number | null>(null);
   const lockedScrollTopRef = useRef<number>(0);
   const [composerHeight, setComposerHeight] = useState<number>(96);
+  const [showAssistantCue, setShowAssistantCue] = useState(false);
+  const stableAppHeightRef = useRef<number>(Math.round(window.innerHeight));
+  const applyAppHeightRef = useRef<() => void>(() => {});
+  const freezeAppHeightRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (!debugOpen) return;
@@ -76,7 +85,7 @@ export default function App() {
   }, [debugEvents, debugOpen]);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia("(max-width: 768px)");
+    const mediaQuery = window.matchMedia("(max-width: 1024px)");
     const onChange = (event: MediaQueryListEvent) => setIsMobile(event.matches);
 
     setIsMobile(mediaQuery.matches);
@@ -85,15 +94,40 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const setHeightVar = () => {
-      const height = window.innerHeight;
-      document.documentElement.style.setProperty("--app-height", `${Math.round(height)}px`);
+    const standaloneQuery = window.matchMedia("(display-mode: standalone)");
+    const updateStandalone = () => {
+      const iosStandalone = Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
+      setIsStandalone(standaloneQuery.matches || iosStandalone);
     };
 
+    updateStandalone();
+    standaloneQuery.addEventListener("change", updateStandalone);
+    return () => standaloneQuery.removeEventListener("change", updateStandalone);
+  }, []);
+
+  useEffect(() => {
+    const setHeightVar = () => {
+      const measuredHeight = Math.round(window.innerHeight);
+
+      // Freeze app shell height during keyboard transition/open on mobile,
+      // so iOS viewport changes don't move the whole container.
+      if (!freezeAppHeightRef.current) {
+        stableAppHeightRef.current = measuredHeight;
+      }
+
+      document.documentElement.style.setProperty(
+        "--app-height",
+        `${stableAppHeightRef.current}px`,
+      );
+    };
+
+    applyAppHeightRef.current = setHeightVar;
     setHeightVar();
     window.addEventListener("resize", setHeightVar);
+    window.visualViewport?.addEventListener("resize", setHeightVar);
     return () => {
       window.removeEventListener("resize", setHeightVar);
+      window.visualViewport?.removeEventListener("resize", setHeightVar);
     };
   }, []);
 
@@ -106,12 +140,24 @@ export default function App() {
         return;
       }
 
-      // iOS keyboard animation may shift visual viewport top and height at the same time.
-      // Using both values avoids counting top-bar motion as keyboard height.
-      const rawOffset = window.innerHeight - (viewport.height + viewport.offsetTop);
-      const normalizedOffset = rawOffset > 80 ? Math.max(0, rawOffset) : 0;
-      const maxReasonableOffset = Math.round(window.innerHeight * 0.55);
-      const baseTargetOffset = Math.min(normalizedOffset, maxReasonableOffset);
+      // iOS may shrink window.innerHeight together with visualViewport while keyboard opens.
+      // Use the frozen pre-keyboard app height as baseline so offset remains measurable.
+      const baselineHeight = Math.max(
+        stableAppHeightRef.current,
+        Math.round(window.innerHeight),
+      );
+      const rawOffset = baselineHeight - (viewport.height + viewport.offsetTop);
+      const activeThreshold = composerFocusedRef.current ? 20 : 80;
+      const normalizedOffset = rawOffset > activeThreshold ? Math.max(0, rawOffset) : 0;
+      const maxReasonableOffset = Math.round(baselineHeight * 0.55);
+      const measuredOffset = Math.min(normalizedOffset, maxReasonableOffset);
+      const mobileFocusedMinOffset =
+        composerFocusedRef.current && window.matchMedia("(max-width: 1024px)").matches
+          ? Math.round(baselineHeight * (isStandalone ? 0.48 : 0.4))
+          : 0;
+      const baseTargetOffset = composerFocusedRef.current
+        ? Math.max(measuredOffset, mobileFocusedMinOffset)
+        : measuredOffset;
       const current = keyboardOffsetRef.current;
       const inFocusStabilizing =
         composerFocusedRef.current && Date.now() < focusStabilizeUntilRef.current;
@@ -120,8 +166,12 @@ export default function App() {
       const holdOffsetWhileFocused =
         composerFocusedRef.current && current > 0 && targetOffset < current;
       const effectiveTargetOffset = holdOffsetWhileFocused ? current : targetOffset;
-      const delta = effectiveTargetOffset - current;
-      const maxStep = effectiveTargetOffset === 0 ? 36 : inFocusStabilizing ? 16 : 24;
+      const lockedFocusedTarget =
+        composerFocusedRef.current && current > 0
+          ? Math.min(effectiveTargetOffset, current)
+          : effectiveTargetOffset;
+      const delta = lockedFocusedTarget - current;
+      const maxStep = lockedFocusedTarget === 0 ? 36 : inFocusStabilizing ? 16 : 24;
       const step = Math.max(-maxStep, Math.min(maxStep, delta));
       const keyboardOffset = current + step;
 
@@ -235,23 +285,6 @@ export default function App() {
     });
   };
 
-  const setFinalText = (finalText: string) => {
-    setMessages((prev) => {
-      const next = [...prev];
-      const last = next[next.length - 1];
-
-      // 如果最后一条不是 assistant（或还没有），就新建一条 assistant
-      if (!last || last.role !== "assistant") {
-        next.push({ id: newId(), role: "assistant", content: finalText });
-        return next;
-      }
-
-      // 否则直接覆盖最后一条 assistant
-      next[next.length - 1] = { ...last, content: finalText };
-      return next;
-    });
-  };
-
   async function playTTS(text: string) {
     const t = text.trim();
     if (!t) return;
@@ -324,6 +357,7 @@ export default function App() {
 
     setError("");
     setStatus("connecting");
+    setShowAssistantCue(true);
     if (debugOpen) setDebugEvents([]);
 
     setMessages((prev) => [...prev, { id: newId(), role: "user", content: trimmed }]);
@@ -348,6 +382,7 @@ export default function App() {
           if (event === "delta") {
             const chunk = typeof data?.text === "string" ? data.text : "";
             if (chunk) {
+              setShowAssistantCue(false);
               setStatus("streaming");
               pushDelta(chunk);
             }
@@ -359,6 +394,7 @@ export default function App() {
             const finalText = typeof data?.text === "string" ? data.text : "";
 
             if (finalText) {
+              setShowAssistantCue(false);
               setMessages((prev) => {
                 const next = [...prev];
                 const last = next[next.length - 1];
@@ -383,6 +419,7 @@ export default function App() {
               setThreadId(nextThreadId);
             }
             setStatus("idle");
+            setShowAssistantCue(false);
             return;
           }
 
@@ -390,6 +427,7 @@ export default function App() {
             const message = typeof data?.message === "string" ? data.message : "Unknown error";
             setError(message);
             setStatus("error");
+            setShowAssistantCue(false);
           }
         },
       );
@@ -397,6 +435,7 @@ export default function App() {
       const message = err instanceof Error ? err.message : "Unknown network error";
       setError(message);
       setStatus("error");
+      setShowAssistantCue(false);
     }
   };
 
@@ -459,6 +498,22 @@ export default function App() {
 
   const handleComposerFocus = () => {
     triggerAudioUnlock();
+    freezeAppHeightRef.current = true;
+    stableAppHeightRef.current = Math.round(window.innerHeight);
+    document.documentElement.style.setProperty(
+      "--app-height",
+      `${stableAppHeightRef.current}px`,
+    );
+    if (isMobile) {
+      // Immediate fallback lift to avoid iOS keyboard covering composer
+      // before visualViewport reports a stable keyboard height.
+      const fallbackOffset = Math.round(stableAppHeightRef.current * (isStandalone ? 0.48 : 0.4));
+      keyboardOffsetRef.current = Math.max(keyboardOffsetRef.current, fallbackOffset);
+      document.documentElement.style.setProperty(
+        "--keyboard-offset",
+        `${Math.max(0, keyboardOffsetRef.current)}px`,
+      );
+    }
     setComposerFocused(true);
     composerFocusedRef.current = true;
     focusStabilizeUntilRef.current = Date.now() + 280;
@@ -471,6 +526,26 @@ export default function App() {
     setComposerFocused(false);
     composerFocusedRef.current = false;
     focusStabilizeUntilRef.current = 0;
+    freezeAppHeightRef.current = false;
+    keyboardOffsetRef.current = 0;
+    document.documentElement.style.setProperty("--keyboard-offset", "0px");
+    window.requestAnimationFrame(() => applyAppHeightRef.current());
+  };
+
+  const handleComposerPointerDown = (e: PointerEvent<HTMLTextAreaElement>) => {
+    if (freezeAppHeightRef.current) return;
+    freezeAppHeightRef.current = true;
+    stableAppHeightRef.current = Math.round(window.innerHeight);
+    document.documentElement.style.setProperty(
+      "--app-height",
+      `${stableAppHeightRef.current}px`,
+    );
+
+    // Prevent iOS Safari from auto-scrolling layout viewport on focus.
+    if (isMobile && document.activeElement !== textareaRef.current) {
+      e.preventDefault();
+      textareaRef.current?.focus({ preventScroll: true });
+    }
   };
 
   const enableSoundAndReplay = async () => {
@@ -492,23 +567,46 @@ export default function App() {
     }
   };
 
+  const resetChat = () => {
+    setMessages([]);
+    setInput("");
+    setError("");
+    setStatus("idle");
+    setShowAssistantCue(false);
+    setNeedsSoundGesture(false);
+    setDebugEvents([]);
+    setThreadId(null);
+
+    try {
+      localStorage.removeItem(THREAD_KEY);
+    } catch {
+      // ignore storage failures (e.g. Safari private mode)
+    }
+  };
+
   return (
-    <div className="h-[var(--app-height)] overflow-hidden bg-muted/30 p-0 text-foreground sm:p-4" onPointerDownCapture={triggerAudioUnlock}>
-      <div className="flex h-full justify-center overflow-hidden">
-        <div className="h-full w-full sm:w-[1133px]">
-        <Card className="flex h-full flex-col overflow-hidden rounded-none sm:h-[744px] sm:rounded-xl">
-          <div className="flex items-center justify-between border-b px-4 py-3">
-            <div className="flex items-center gap-2">
-              <div className="text-base font-semibold">AisleBay Chat</div>
-              <Badge variant="secondary">Local</Badge>
+    <div
+      className="fixed inset-0 h-[var(--app-height)] overflow-hidden bg-muted/30 p-0 text-foreground lg:static lg:p-4"
+      onPointerDownCapture={triggerAudioUnlock}
+    >
+      <div className="flex h-full justify-center overflow-hidden" style={isMobile ? { width: "100vw", maxWidth: "100vw" } : undefined}>
+        <div className="h-full w-full lg:w-[1133px]" style={isMobile ? { width: "100vw", maxWidth: "100vw" } : undefined}>
+        <Card className="flex h-full flex-col overflow-hidden rounded-none border-0 lg:h-[744px] lg:rounded-xl lg:border" style={isMobile ? { width: "100vw", maxWidth: "100vw" } : undefined}>
+          <div className="flex items-center justify-between border-b px-4 pb-[6px] pt-1 -mt-1 lg:mt-0 lg:py-3">
+            <div className="flex items-center">
+              <div className="text-[1.125rem] font-semibold lg:text-base">AisleBay Chat</div>
             </div>
-            <Badge variant={status === "streaming" ? "default" : "secondary"}>
-              {status === "connecting"
-                ? "Connecting"
-                : status === "streaming"
-                  ? "Thinking"
-                  : "Ready"}
-            </Badge>
+            <Button
+              type="button"
+              variant="secondary"
+              className="mr-2 h-7 w-7 rounded-full p-0 lg:mr-2 lg:h-9 lg:w-9"
+              onClick={resetChat}
+              disabled={status === "connecting" || status === "streaming"}
+              aria-label="Refresh chat"
+              title="Refresh chat"
+            >
+              <RotateCw className="h-3.5 w-3.5 lg:h-4 lg:w-4" />
+            </Button>
           </div>
 
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -525,7 +623,18 @@ export default function App() {
               style={{ paddingBottom: `${composerHeight + 12}px` }}
             >
               {messages.length === 0 ? (
-                <div className="flex h-full items-center justify-center text-center sm:-translate-y-6">
+                <div
+                  className="flex h-full items-center justify-center text-center sm:-translate-y-6"
+                  style={
+                    isMobile
+                      ? {
+                          transform: composerFocused
+                            ? "translateY(calc(-24px - (var(--keyboard-offset) * 0.28)))"
+                            : "translateY(-24px)",
+                        }
+                      : undefined
+                  }
+                >
                   <div className="text-2xl font-bold">What can I help you find today?</div>
                 </div>
               ) : (
@@ -583,11 +692,19 @@ export default function App() {
                   ) : null}
                 </div>
               ) : null}
+
+              {showAssistantCue && (status === "connecting" || status === "streaming") ? (
+                <div className="mt-[30px] flex w-full justify-start">
+                  <div className="assistantCueBubble" aria-live="polite" aria-label="AI is preparing a response">
+                    <span className="assistantCueDot" />
+                  </div>
+                </div>
+              ) : null}
             </main>
 
             <div
               ref={composerRef}
-              className="fixed inset-x-0 z-20 bg-background px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 sm:absolute sm:left-0 sm:right-0"
+              className="fixed inset-x-0 z-20 bg-background px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 lg:absolute lg:left-0 lg:right-0"
               style={{
                 bottom: 0,
                 paddingBottom: "max(12px, env(safe-area-inset-bottom), var(--keyboard-offset))",
@@ -595,9 +712,11 @@ export default function App() {
             >
               <form onSubmit={handleSubmit} className="mx-auto flex max-w-[1133px] items-center gap-2 rounded-[28px] border bg-background px-2 py-1">
                 <Textarea
+                  ref={textareaRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleComposerKeyDown}
+                  onPointerDown={handleComposerPointerDown}
                   onFocus={handleComposerFocus}
                   onBlur={handleComposerBlur}
                   placeholder={isMobile ? "Type or speak to find items…" : "Type or speak to find items, check availability, or get quick help..."}

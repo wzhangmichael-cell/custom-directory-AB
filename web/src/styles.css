@@ -37,7 +37,7 @@ body {
   height: var(--app-height);
   display: flex;
   justify-content: center;
-  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+  padding: 0;
   overflow: hidden;
 }
 
@@ -251,16 +251,62 @@ body {
   color: rgba(229, 231, 235, 0.95);
 }
 
-@media (max-width: 768px) {
+.assistantCueBubble {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.assistantCueDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #181818;
+  animation: assistant-breathe 1.05s ease-in-out infinite;
+}
+
+@keyframes assistant-breathe {
+  0% {
+    transform: scale(0.86);
+    opacity: 0.72;
+    box-shadow: 0 0 0 0 rgba(24, 24, 24, 0.34);
+  }
+  60% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 0 8px rgba(24, 24, 24, 0);
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.82;
+    box-shadow: 0 0 0 0 rgba(24, 24, 24, 0);
+  }
+}
+
+@media (max-width: 1024px) {
+  .assistantCueBubble {
+    width: 36px;
+    height: 36px;
+  }
+
+  .assistantCueDot {
+    width: 20px;
+    height: 20px;
+  }
+
   #root {
-    padding: 0;
+    padding-top: 0 !important;
   }
 
   .app {
     max-width: none;
+    width: 100vw;
     height: 100vh;
     height: 100dvh;
-    height: var(--app-height);
+    height: calc(var(--app-height) + env(safe-area-inset-top));
+    margin-top: calc(-1 * env(safe-area-inset-top));
     border: 0;
     border-radius: 0;
   }
@@ -273,7 +319,13 @@ body {
 
   .debugFab {
     left: 8px;
-    top: 56px;
+    top: 45px;
+  }
+}
+
+@media (min-width: 1025px) {
+  #root {
+    padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
   }
 }
 
