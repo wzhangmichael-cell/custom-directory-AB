@@ -1,4 +1,4 @@
-import type { Ref } from "react";
+import { useRef, type Ref } from "react";
 import styles from "./VoiceButton.module.css";
 
 type Props = {
@@ -21,6 +21,15 @@ export default function VoiceButton({
   buttonRef,
 }: Props) {
   const disabled = isTranscribing;
+  const ignoreClickUntilRef = useRef<number>(0);
+  const triggerAction = () => {
+    if (disabled) return;
+    if (isRecording) {
+      onStop();
+      return;
+    }
+    onStart();
+  };
 
   return (
     <button
@@ -32,7 +41,18 @@ export default function VoiceButton({
         disabled ? styles.disabled : "",
       ].join(" ")}
       style={{ right, bottom }}
-      onClick={isRecording ? onStop : onStart}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        ignoreClickUntilRef.current = Date.now() + 450;
+        triggerAction();
+      }}
+      onClick={(e) => {
+        if (Date.now() < ignoreClickUntilRef.current) {
+          e.preventDefault();
+          return;
+        }
+        triggerAction();
+      }}
       disabled={disabled}
       aria-label={
         isTranscribing
