@@ -2,7 +2,7 @@ import { FormEvent, KeyboardEvent, PointerEvent, useEffect, useRef, useState } f
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowUp, RotateCw } from "lucide-react";
+import { ArrowDown, ArrowUp, RotateCw } from "lucide-react";
 import VoiceButton from "./components/VoiceButton";
 import { useVoiceInput } from "./lib/useVoiceInput";
 import { useChatSession } from "./hooks/useChatSession";
@@ -19,6 +19,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [composerFocused, setComposerFocused] = useState(false);
   const [isSmallRangeScroll, setIsSmallRangeScroll] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 1024px)").matches);
   const [isStandalone, setIsStandalone] = useState(() => {
     const standaloneMatch = window.matchMedia("(display-mode: standalone)").matches;
@@ -59,12 +60,35 @@ export default function App() {
   const focusStabilizeUntilRef = useRef<number>(0);
   const composerFocusedRef = useRef<boolean>(false);
   const scrollLockRafRef = useRef<number | null>(null);
+  const viewportLockRafRef = useRef<number | null>(null);
   const lockedScrollTopRef = useRef<number>(0);
   const [composerHeight, setComposerHeight] = useState<number>(96);
   const stableAppHeightRef = useRef<number>(Math.round(window.innerHeight));
   const applyAppHeightRef = useRef<() => void>(() => {});
   const freezeAppHeightRef = useRef<boolean>(false);
   const hasMessages = messages.length > 0;
+
+  const scrollMainToBottom = () => {
+    const node = mainScrollRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+  };
+
+  const updateScrollToBottomVisibility = () => {
+    const node = mainScrollRef.current;
+    if (!node || !hasMessages) {
+      setShowScrollToBottom(false);
+      return;
+    }
+    const isOverflowing = node.scrollHeight > node.clientHeight + 1;
+    if (!isOverflowing) {
+      setShowScrollToBottom(false);
+      return;
+    }
+    const distanceToBottom = node.scrollHeight - node.clientHeight - node.scrollTop;
+    const threshold = 284;
+    setShowScrollToBottom(distanceToBottom > threshold);
+  };
 
   useEffect(() => {
     if (!debugOpen) return;
@@ -189,6 +213,9 @@ export default function App() {
       if (scrollLockRafRef.current !== null) {
         window.cancelAnimationFrame(scrollLockRafRef.current);
       }
+      if (viewportLockRafRef.current !== null) {
+        window.cancelAnimationFrame(viewportLockRafRef.current);
+      }
       window.removeEventListener("resize", scheduleKeyboardOffset);
       window.visualViewport?.removeEventListener("resize", scheduleKeyboardOffset);
     };
@@ -256,6 +283,25 @@ export default function App() {
   }, [hasMessages, messages, error, needsSoundGesture, showAssistantCue, status, composerHeight, composerFocused]);
 
   useEffect(() => {
+    const node = mainScrollRef.current;
+    if (!node) {
+      setShowScrollToBottom(false);
+      return;
+    }
+    updateScrollToBottomVisibility();
+    const onScroll = () => updateScrollToBottomVisibility();
+    const onResize = () => updateScrollToBottomVisibility();
+    node.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onResize);
+    window.visualViewport?.addEventListener("resize", onResize);
+    return () => {
+      node.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onResize);
+      window.visualViewport?.removeEventListener("resize", onResize);
+    };
+  }, [hasMessages, messages, composerHeight, status, composerFocused]);
+
+  useEffect(() => {
     const node = composerRef.current;
     if (!node || typeof ResizeObserver === "undefined") return;
 
@@ -320,6 +366,7 @@ export default function App() {
   const submitCurrentInput = async () => {
     const text = input.trim();
     if (!text) return;
+    scrollMainToBottom();
     setInput("");
     await sendMessage(text);
   };
@@ -384,8 +431,19 @@ export default function App() {
     composerFocusedRef.current = true;
     focusStabilizeUntilRef.current = Date.now() + 280;
     lockMainScrollBriefly();
-    // iOS may auto-scroll focused fields; force viewport back to top immediately.
-    window.requestAnimationFrame(() => window.scrollTo(0, 0));
+    const lockUntil = Date.now() + 900;
+    if (viewportLockRafRef.current !== null) {
+      window.cancelAnimationFrame(viewportLockRafRef.current);
+    }
+    const keepViewportTop = () => {
+      window.scrollTo(0, 0);
+      if (Date.now() < lockUntil && composerFocusedRef.current) {
+        viewportLockRafRef.current = window.requestAnimationFrame(keepViewportTop);
+      } else {
+        viewportLockRafRef.current = null;
+      }
+    };
+    viewportLockRafRef.current = window.requestAnimationFrame(keepViewportTop);
   };
 
   const handleComposerBlur = () => {
@@ -395,11 +453,24 @@ export default function App() {
     freezeAppHeightRef.current = false;
     keyboardOffsetRef.current = 0;
     document.documentElement.style.setProperty("--keyboard-offset", "0px");
+    if (viewportLockRafRef.current !== null) {
+      window.cancelAnimationFrame(viewportLockRafRef.current);
+      viewportLockRafRef.current = null;
+    }
     window.requestAnimationFrame(() => applyAppHeightRef.current());
   };
 
   const handleComposerPointerDown = (e: PointerEvent<HTMLTextAreaElement>) => {
-    if (freezeAppHeightRef.current) return;
+    if (status === "connecting" || status === "streaming") {
+      e.preventDefault();
+      return;
+    }
+    if (freezeAppHeightRef.current) {
+      if (isMobile) {
+        e.preventDefault();
+      }
+      return;
+    }
     freezeAppHeightRef.current = true;
     stableAppHeightRef.current = Math.round(window.innerHeight);
     document.documentElement.style.setProperty(
@@ -413,6 +484,27 @@ export default function App() {
       textareaRef.current?.focus({ preventScroll: true });
     }
   };
+
+  const handleSendPointerDown = (e: PointerEvent<HTMLButtonElement>) => {
+    triggerAudioUnlock();
+    if (!isMobile) return;
+    e.preventDefault();
+    if (status === "connecting" || status === "streaming") return;
+    void submitCurrentInput();
+  };
+
+  useEffect(() => {
+    if (!composerFocused || !isMobile) return;
+    const nudgeToTop = () => {
+      if (!composerFocusedRef.current) return;
+      window.scrollTo(0, 0);
+    };
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("scroll", nudgeToTop);
+    return () => {
+      viewport?.removeEventListener("scroll", nudgeToTop);
+    };
+  }, [composerFocused, isMobile]);
 
   const resetChatAndInput = () => {
     setInput("");
@@ -539,6 +631,19 @@ export default function App() {
               </div>
             </main>
 
+            {showScrollToBottom ? (
+              <button
+                type="button"
+                onClick={scrollMainToBottom}
+                className="absolute left-1/2 z-30 flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border border-border/70 bg-background/95 text-foreground shadow-sm backdrop-blur-sm transition hover:bg-background"
+                style={{ bottom: `calc(${composerHeight + 18}px + var(--keyboard-offset))` }}
+                aria-label="Scroll to latest message"
+                title="Scroll to latest message"
+              >
+                <ArrowDown className="h-4 w-4" />
+              </button>
+            ) : null}
+
             <div
               ref={composerRef}
               className="absolute inset-x-0 z-20 bg-background px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3"
@@ -564,7 +669,7 @@ export default function App() {
                 <div className="flex items-center gap-1">
                   <button
                     type="submit"
-                    onPointerDown={triggerAudioUnlock}
+                    onPointerDown={handleSendPointerDown}
                     disabled={status === "connecting" || status === "streaming"}
                     className={[
                       "flex h-11 w-11 items-center justify-center rounded-full",
